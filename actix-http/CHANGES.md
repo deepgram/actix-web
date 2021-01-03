@@ -19,10 +19,13 @@
 * Remove `ConnectError::SslHandshakeError` and re-export of `HandshakeError`.
   due to the removal of this type from `tokio-openssl` crate. openssl handshake 
   error would return as `ConnectError::SslError`. [#1813]
+* `Response::set` and `Response::header` methods; use the respective `Response::set_header` and
+  `Reponse::append_header` methods. [#1869]
 
 [#1813]: https://github.com/actix/actix-web/pull/1813
 [#1857]: https://github.com/actix/actix-web/pull/1857
 [#1864]: https://github.com/actix/actix-web/pull/1864
+[#1869]: https://github.com/actix/actix-web/pull/1869
 
 
 ## 2.2.0 - 2020-11-25
