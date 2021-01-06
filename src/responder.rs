@@ -1,24 +1,28 @@
-use std::convert::TryFrom;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
-use actix_http::error::InternalError;
-use actix_http::http::{
-    header::IntoHeaderPair, Error as HttpError, HeaderMap, HeaderName, StatusCode,
+use std::{
+    fmt,
+    future::Future,
+    marker::PhantomData,
+    pin::Pin,
+    task::{Context, Poll},
 };
-use actix_http::{Error, Response, ResponseBuilder};
+
+use actix_http::{
+    error::InternalError,
+    http::{header::IntoHeaderPair, Error as HttpError, HeaderMap, StatusCode},
+    Error, Response, ResponseBuilder,
+};
 use bytes::{Bytes, BytesMut};
-use futures_util::future::{err, ok, Either as EitherFuture, Ready};
-use futures_util::ready;
+use futures_util::{
+    future::{err, ok, Either as EitherFuture, Ready},
+    ready,
+};
 use pin_project::pin_project;
 
 use crate::request::HttpRequest;
 
-/// Trait implemented by types that can be converted to a http response.
+/// Trait implemented by types that can be converted to an HTTP response.
 ///
-/// Types that implement this trait can be used as the return type of a handler.
+/// Any types that implement this trait can be used in the return type of a handler.
 pub trait Responder {
     /// The associated error which can be returned.
     type Error: Into<Error>;
@@ -26,18 +30,17 @@ pub trait Responder {
     /// The future response value.
     type Future: Future<Output = Result<Response, Self::Error>>;
 
-    /// Convert itself to `AsyncResult` or `Error`.
+    /// Convert self to a future returning a [`Response`] or an error.
     fn respond_to(self, req: &HttpRequest) -> Self::Future;
 
     /// Override a status code for a Responder.
     ///
     /// ```rust
-    /// use actix_web::{HttpRequest, Responder, http::StatusCode};
+    /// use actix_web::{http::StatusCode, HttpRequest, Responder};
     ///
     /// fn index(req: HttpRequest) -> impl Responder {
     ///     "Welcome!".with_status(StatusCode::OK)
     /// }
-    /// # fn main() {}
     /// ```
     fn with_status(self, status: StatusCode) -> CustomResponder<Self>
     where
@@ -46,7 +49,9 @@ pub trait Responder {
         CustomResponder::new(self).with_status(status)
     }
 
-    /// Add header to the Responder's response.
+    /// Insert header to the final response.
+    ///
+    /// Overrides other headers with the same name.
     ///
     /// ```rust
     /// use actix_web::{web, HttpRequest, Responder};
@@ -58,21 +63,17 @@ pub trait Responder {
     /// }
     ///
     /// fn index(req: HttpRequest) -> impl Responder {
-    ///     web::Json(
-    ///         MyObj{name: "Name".to_string()}
-    ///     )
-    ///     .with_header("x-version", "1.2.3")
+    ///     web::Json(MyObj { name: "Name".to_owned() })
+    ///         .with_header(("x-version", "1.2.3"))
     /// }
-    /// # fn main() {}
     /// ```
-    fn with_header<K, V>(self, key: K, value: V) -> CustomResponder<Self>
+    fn with_header<H>(self, header: H) -> CustomResponder<Self>
     where
         Self: Sized,
-        HeaderName: TryFrom<K>,
-        <HeaderName as TryFrom<K>>::Error: Into<HttpError>,
-        V: IntoHeaderValue,
+        H: IntoHeaderPair,
+        H::Error: Into<HttpError>,
     {
-        CustomResponder::new(self).with_header(key, value)
+        CustomResponder::new(self).with_header(header)
     }
 }
 
@@ -214,7 +215,7 @@ impl Responder for BytesMut {
     }
 }
 
-/// Allows to override status code and headers for a responder.
+/// Allows overriding status code and headers for a responder.
 pub struct CustomResponder<T> {
     responder: T,
     status: Option<StatusCode>,
@@ -240,14 +241,15 @@ impl<T: Responder> CustomResponder<T> {
     /// fn index(req: HttpRequest) -> impl Responder {
     ///     "Welcome!".with_status(StatusCode::OK)
     /// }
-    /// # fn main() {}
     /// ```
     pub fn with_status(mut self, status: StatusCode) -> Self {
         self.status = Some(status);
         self
     }
 
-    /// Add header to the Responder's response.
+    /// Insert header to the final response.
+    ///
+    /// Overrides other headers with the same name.
     ///
     /// ```rust
     /// use actix_web::{web, HttpRequest, Responder};
@@ -259,12 +261,9 @@ impl<T: Responder> CustomResponder<T> {
     /// }
     ///
     /// fn index(req: HttpRequest) -> impl Responder {
-    ///     web::Json(
-    ///         MyObj{name: "Name".to_string()}
-    ///     )
-    ///     .with_header(("x-version", "1.2.3"))
+    ///     web::Json(MyObj { name: "Name".to_string() })
+    ///         .with_header(("x-version", "1.2.3"))
     /// }
-    /// # fn main() {}
     /// ```
     pub fn with_header<H>(mut self, header: H) -> Self
     where
@@ -313,23 +312,27 @@ impl<T: Responder> Future for CustomResponderFut<T> {
 
         let mut res = match ready!(this.fut.poll(cx)) {
             Ok(res) => res,
-            Err(e) => return Poll::Ready(Err(e)),
+            Err(err) => return Poll::Ready(Err(err)),
         };
+
         if let Some(status) = this.status.take() {
             *res.status_mut() = status;
         }
+
         if let Some(ref headers) = this.headers {
             for (k, v) in headers {
+                // TODO: before v4, decide if this should be append instead
                 res.headers_mut().insert(k.clone(), v.clone());
             }
         }
+
         Poll::Ready(Ok(res))
     }
 }
 
 impl<T> Responder for InternalError<T>
 where
-    T: std::fmt::Debug + std::fmt::Display + 'static,
+    T: fmt::Debug + fmt::Display + 'static,
 {
     type Error = Error;
     type Future = Ready<Result<Response, Error>>;
@@ -534,7 +537,7 @@ pub(crate) mod tests {
 
         let res = "test"
             .to_string()
-            .with_header("content-type", "json")
+            .with_header(("content-type", "json"))
             .respond_to(&req)
             .await
             .unwrap();
@@ -559,7 +562,7 @@ pub(crate) mod tests {
 
         let req = TestRequest::default().to_http_request();
         let res = ("test".to_string(), StatusCode::OK)
-            .with_header("content-type", "json")
+            .with_header(CONTENT_TYPE, mime::APPLICATION_JSON)
             .respond_to(&req)
             .await
             .unwrap();
@@ -567,7 +570,7 @@ pub(crate) mod tests {
         assert_eq!(res.body().bin_ref(), b"test");
         assert_eq!(
             res.headers().get(CONTENT_TYPE).unwrap(),
-            HeaderValue::from_static("json")
+            HeaderValue::from_static("application/json")
         );
     }
 }
