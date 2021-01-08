@@ -30,7 +30,7 @@ use super::payload::{Payload, PayloadSender, PayloadStatus};
 use super::{Message, MessageType};
 
 const LW_BUFFER_SIZE: usize = 4096;
-const HW_BUFFER_SIZE: usize = 32_768;
+const HW_BUFFER_SIZE: usize = 131_072;
 const MAX_PIPELINED_MESSAGES: usize = 16;
 
 bitflags! {
