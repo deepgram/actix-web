@@ -11,7 +11,7 @@ use http::header::{HeaderName, HeaderValue};
 use http::{header, HttpTryFrom, Method, Uri, Version};
 use uri::Url;
 
-const MAX_BUFFER_SIZE: usize = 131_072;
+const MAX_BUFFER_SIZE: usize = 1024 * 256;
 const MAX_HEADERS: usize = 96;
 
 pub(crate) struct H1Decoder {
